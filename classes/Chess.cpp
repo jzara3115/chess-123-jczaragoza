@@ -52,15 +52,61 @@ void Chess::setUpBoard()
 }
 
 void Chess::FENtoBoard(const std::string& fen) {
-    // convert a FEN string to a board
-    // FEN is a space delimited string with 6 fields
-    // 1: piece placement (from white's perspective)
-    // NOT PART OF THIS ASSIGNMENT BUT OTHER THINGS THAT CAN BE IN A FEN STRING
-    // ARE BELOW
-    // 2: active color (W or B)
-    // 3: castling availability (KQkq or -)
-    // 4: en passant target square (in algebraic notation, or -)
-    // 5: halfmove clock (number of halfmoves since the last capture or pawn advance)
+    
+    // Extract just the board position part (first field before any space)
+    std::string boardPosition = fen;
+    size_t spacePos = fen.find(' ');
+    if (spacePos != std::string::npos) {
+        boardPosition = fen.substr(0, spacePos);
+    }
+    
+    // Clear the board first
+    _grid->forEachSquare([](ChessSquare* square, int x, int y) {
+        square->destroyBit();
+    });
+    
+    // Parse the FEN string
+    // FEN describes board from rank 8 (top, y=7) to rank 1 (bottom, y=0)
+    // Within each rank, goes from file a (x=0) to file h (x=7)
+    int x = 0;
+    int y = 7;  //top rank
+    
+    for (char c : boardPosition) {
+        if (c == '/') {
+            //next rank
+            y--;
+            x = 0;
+        } else if (c >= '1' && c <= '8') {
+            // Empty then skip ahead
+            x += (c - '0');
+        } else {
+            ChessPiece pieceType = NoPiece;
+            int playerNumber = -1;
+            
+            // Find piece type
+            char upperC = toupper(c);
+            switch (upperC) {
+                case 'P': pieceType = Pawn; break;
+                case 'N': pieceType = Knight; break;
+                case 'B': pieceType = Bishop; break;
+                case 'R': pieceType = Rook; break;
+                case 'Q': pieceType = Queen; break;
+                case 'K': pieceType = King; break;
+            }
+            
+            // uppercase = white = player 0, lowercase = black = player 1
+            playerNumber = (c >= 'A' && c <= 'Z') ? 0 : 1;
+            
+            // Create and place the piece
+            if (pieceType != NoPiece && x < 8 && y >= 0) {
+                Bit* piece = PieceForPlayer(playerNumber, pieceType);
+                piece->setGameTag(pieceType + (playerNumber * 128));
+                _grid->getSquare(x, y)->setBit(piece);
+            }
+            
+            x++;
+        }
+    }
 }
 
 bool Chess::actionForEmptyHolder(BitHolder &holder)
