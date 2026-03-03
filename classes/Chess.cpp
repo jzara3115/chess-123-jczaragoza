@@ -75,7 +75,7 @@ void Chess::testMoveGeneration()
     }
     
     if (moveCount >= 20) {
-        std::cout << "\nBreakpoint location: moveList array contains first 20 moves\n";
+        std::cout << "\n moveList array containing first 20 moves\n";
     }
 }
 
