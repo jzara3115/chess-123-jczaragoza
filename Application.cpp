@@ -71,10 +71,15 @@ namespace ClassGame {
                         ImGui::Text("%s", stateString.substr(y*stride,stride).c_str());
                     }
                     ImGui::Text("Current Board State: %s", game->stateString().c_str());
-                }
-                ImGui::End();
+                    
+                    // Show first 20 moves the array can hold, legal moves
+                    Chess* chess = dynamic_cast<Chess*>(game);
+                    if (chess && ImGui::Button("Test Moves")) {
+                        chess->testMoveGeneration();
+                    }
+                }                ImGui::End();
 
-                ImGui::Begin("GameWindow");
+                ImGui::Begin("GameWindow", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
                 if (game) {
                     if (game->gameHasAI() && (game->getCurrentPlayer()->isAIPlayer() || game->_gameOptions.AIvsAI))
                     {

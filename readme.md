@@ -1,13 +1,18 @@
-Fork or clone your this chess project into a new GitHub repository.
+Jc Zaragoza
+1983950
+CMPM 123
+3/2/26
 
-Add support for FEN stringsLinks to an external site. to your game setup so that instead of the current way you are setting up your game board you are setting it up with a call similar to the following call.
+After the board setup assignment, the goal was implementing a movement system. Since chess move generation can get really hard really fast, I focused on building a foundation that could scale later. To do this, I added a bitboard-based representation of the board, which uses a 64-bit integer to represent piece positions and allows move generation to be done more efficiently through bit operations instead of constantly looping through a grid.
 
-FENtoBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR");
+I created a new Bitboard.h header to hold the core data structures. This had a BitMove structure for moves, helper functions for scanning bits, and pre calculated attack tables for Knights and Kings. The pre calculated tables made the move generation easier, since instead of recalculating movement every time, I could just reference a lookup table based on the piece’s square and then filter out illegal destinations.
 
-Your routine should be able to take just the board position portion of a FEN string, or the entire FEN string like so:
+Then, I implemented legal move generation for the pawns, knights, and kings. Pawns needed the most special case logic because their movement rules depend on direction and whether they are moving or capturing. I did single forward movement, double pushes from the starting rank, and diagonal captures, with separate logic for white and black so each side advances in the correct direction. Knights were more straightforward because their move pattern does not depend on blockers, and their attacks can be generated purely from the pre-calculated bitboards. Kings were like knights in terms of attack table usage, but needed more filtering so they couldnt move onto friendly squares.
 
-FENtoBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+After adding move generation, I updated canBitMoveFromTo() so it can detect moves based on the legal move list instead of relying on ad-hoc checks. The process is to find all legal moves for the current player, compare the requested move against that list, and only allow it if it matches a legal entry. This made the validation system much more consistent, since every move the player attempts is checked against the same rules the engine uses to generate moves.
 
-(you can ignore the end for now)
+I also added a turn-based playstyle where players change between White and Black, and only pieces belonging to the current player can be moved. This prevented out of turn moves and kept the logic aligned with real chess rules even with only a partial piece set implemented. Then I implemented capture mechanics so pieces can properly take enemy pieces. Captures follow normal chess rules, a piece can move onto an enemy-occupied square and remove that piece from the board, but friendly pieces cannot be captured. Pawns required extra care here because their capture rules are different from their normal forward movement, so I made sure diagonal captures were only allowed when an enemy piece exists on the target square. To make sure that move generation was working, I added a testMoveGeneration() function that runs during board setup. This function finds all legal moves from the current position, and prints the first 20 moves to the console.
 
-This will allow you to quickly check that your castling, promotion and en passant code is working.
+I used classes/ Bitboard.h as the main place for bitboard structures and attack tables, then updated Chess.h and Chess.cpp to include move generation, FEN parsing, and validation logic for cleaner code. The key functions I built around were FENtoBoard() for setup, buildBitboards() for converting the grid representation into bitboards, generateMoves() and the piece-specific generators for creating the move list, and canBitMoveFromTo() for enforcing legality.
+
+For the overall strategy, I based my approach on bitboard-style chess programming patterns. The flow is basically build bitboards, identify all pieces for the current player, generate legal moves using bit operations and attack tables, filter out moves that land on friendly pieces, and return the list of legal moves.
