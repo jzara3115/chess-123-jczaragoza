@@ -3,6 +3,16 @@ Jc Zaragoza
 CMPM 123
 3/2/26
 
+Update (3/9/26)
+
+A big part of this update was adding the required generateAllMoves() method, which gives a std::vector<BitMove> containing every legal move for the side to move. This gave me a clean interface for move generation while also making it easier to test and work with move lists. The flow stayed the same conceptually, I first build bitboards for both sides from the live board state, then make moves piece by piece for the player (pawn, knight, bishop, rook, queen, king), and then return the full list of legal destinations with generateAllMoves().
+
+For the sliding pieces (rooks, bishops, and queens), the main challenge was adding directional movement and making sure blocking and capturing was like real chess. Rooks generate moves in the four directions, bishops generate moves in the four diagonal directions, and queens combine both patterns to move eight directions. In every case, movement continues square-by-square until it is blocked by a piece. Friendly pieces stop movement immediately and cant be captured, while enemy pieces can be captured but also stop the piece from moving in that direction.
+
+Even though I introduced generateAllMoves() as the main move generation method, I kept the existing generateMoves(BitMove* moveList, int maxMoves) interface as a compatibility wrapper. This was important because the original array based approach is still good for debugging, breakpoints, and the screenshot requirements. The wrapper calls generateAllMoves() and then copies the results into the move array, keeping the behavior the same while allowing the new system to be the source of truth.
+
+With these changes, movement is fully turn-based for white and black and supports legal capture behavior for all current pieces. This update has the standard movement ruleset and also sets up a solid foundation for adding special moves or more rule enforcement later if I wanted to add things like that.
+
 After the board setup assignment, the goal was implementing a movement system. Since chess move generation can get really hard really fast, I focused on building a foundation that could scale later. To do this, I added a bitboard-based representation of the board, which uses a 64-bit integer to represent piece positions and allows move generation to be done more efficiently through bit operations instead of constantly looping through a grid.
 
 I created a new Bitboard.h header to hold the core data structures. This had a BitMove structure for moves, helper functions for scanning bits, and pre calculated attack tables for Knights and Kings. The pre calculated tables made the move generation easier, since instead of recalculating movement every time, I could just reference a lookup table based on the piece’s square and then filter out illegal destinations.

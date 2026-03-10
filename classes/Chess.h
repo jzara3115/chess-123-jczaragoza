@@ -42,10 +42,14 @@ public:
     Grid* getGrid() override { return _grid; }
 
     // Move generation
+    std::vector<BitMove> generateAllMoves();
     int generateMoves(BitMove* moveList, int maxMoves);
-    void generatePawnMoves(BitMove* moveList, int& moveCount, int maxMoves);
-    void generateKnightMoves(BitMove* moveList, int& moveCount, int maxMoves);
-    void generateKingMoves(BitMove* moveList, int& moveCount, int maxMoves);
+    void generatePawnMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7]);
+    void generateKnightMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7]);
+    void generateKingMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7]);
+    void generateRookMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7]);
+    void generateBishopMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7]);
+    void generateQueenMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7]);
     void testMoveGeneration();
 
 private:
@@ -56,8 +60,8 @@ private:
     
     // Helper functions for moving
     void buildBitboards(uint64_t bitboards[2][7]);
-    bool isSquareAttacked(int square, int byPlayer, uint64_t bitboards[2][7]);
     ChessPiece getPieceTypeAt(int x, int y) const;
+    void addSlidingMoves(std::vector<BitMove>& moves, ChessPiece pieceType, int currentPlayer, uint64_t pieces, uint64_t friendlyPieces, uint64_t enemyPieces);
 
     Grid* _grid;
 };

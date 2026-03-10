@@ -2,6 +2,8 @@
 #include <limits>
 #include <cmath>
 #include <iostream>
+#include <algorithm>
+#include <cctype>
 
 Chess::Chess()
 {
@@ -162,17 +164,12 @@ bool Chess::canBitMoveFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     int toSquare = dstSquare->getSquareIndex();
 
     ChessPiece pieceType = (ChessPiece)(bit.gameTag() & 0x7F);
-    int playerNumber = getCurrentPlayer()->playerNumber();
+    std::vector<BitMove> legalMoves = generateAllMoves();
     
-    //generate all legal moves for current player
-    BitMove moveList[256];
-    int moveCount = generateMoves(moveList, 256);
-    
-    //check if move is in the list of legal moves
-    for (int i = 0; i < moveCount; i++) {
-        if (moveList[i].from == fromSquare && 
-            moveList[i].to == toSquare && 
-            moveList[i].piece == pieceType) {
+    for (const BitMove& move : legalMoves) {
+        if (move.from == fromSquare &&
+            move.to == toSquare &&
+            move.piece == pieceType) {
             return true;
         }
     }
@@ -217,179 +214,231 @@ void Chess::buildBitboards(uint64_t bitboards[2][7])
     });
 }
 
+std::vector<BitMove> Chess::generateAllMoves()
+{
+    int currentPlayer = getCurrentPlayer()->playerNumber();
+    uint64_t bitboards[2][7];
+    buildBitboards(bitboards);
+
+    std::vector<BitMove> moves;
+    moves.reserve(256);
+
+    generatePawnMoves(moves, currentPlayer, bitboards);
+    generateKnightMoves(moves, currentPlayer, bitboards);
+    generateBishopMoves(moves, currentPlayer, bitboards);
+    generateRookMoves(moves, currentPlayer, bitboards);
+    generateQueenMoves(moves, currentPlayer, bitboards);
+    generateKingMoves(moves, currentPlayer, bitboards);
+
+    return moves;
+}
+
 int Chess::generateMoves(BitMove* moveList, int maxMoves)
 {
-    int moveCount = 0;
-    
-    generatePawnMoves(moveList, moveCount, maxMoves);
-    generateKnightMoves(moveList, moveCount, maxMoves);
-    generateKingMoves(moveList, moveCount, maxMoves);
-    
+    std::vector<BitMove> moves = generateAllMoves();
+    int moveCount = std::min((int)moves.size(), maxMoves);
+    for (int i = 0; i < moveCount; i++) {
+        moveList[i] = moves[i];
+    }
     return moveCount;
 }
 
-void Chess::generatePawnMoves(BitMove* moveList, int& moveCount, int maxMoves)
+void Chess::generatePawnMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7])
 {
-    int currentPlayer = getCurrentPlayer()->playerNumber();
-    
-    uint64_t bitboards[2][7];
-    buildBitboards(bitboards);
-    
     uint64_t pawns = bitboards[currentPlayer][Pawn];
     uint64_t allPieces = 0ULL;
     uint64_t enemyPieces = 0ULL;
-    
-    // Calculate taken squares
+
     for (int piece = Pawn; piece <= King; piece++) {
         allPieces |= bitboards[0][piece];
         allPieces |= bitboards[1][piece];
         enemyPieces |= bitboards[1 - currentPlayer][piece];
     }
-    
+
     uint64_t emptySquares = ~allPieces;
-    
+
     BitboardElement pawnBB(pawns);
     pawnBB.forEachBit([&](int square) {
-        if (moveCount >= maxMoves) return;
-        
         int rank = square / 8;
         int file = square % 8;
-        
-        if (currentPlayer == 0) { // White pawns
+
+        if (currentPlayer == 0) {
             int targetSquare = square + 8;
             if (targetSquare < 64 && (emptySquares & (1ULL << targetSquare))) {
-                if (moveCount < maxMoves) {
-                    moveList[moveCount++] = BitMove(square, targetSquare, Pawn);
-                }
-                
+                moves.push_back(BitMove(square, targetSquare, Pawn));
                 if (rank == 1) {
                     int doublePushSquare = square + 16;
                     if (emptySquares & (1ULL << doublePushSquare)) {
-                        if (moveCount < maxMoves) {
-                            moveList[moveCount++] = BitMove(square, doublePushSquare, Pawn);
-                        }
+                        moves.push_back(BitMove(square, doublePushSquare, Pawn));
                     }
                 }
             }
-            
-            // diagonal captures
+
             if (file > 0) {
                 int captureSquare = square + 7;
                 if (captureSquare < 64 && (enemyPieces & (1ULL << captureSquare))) {
-                    if (moveCount < maxMoves) {
-                        moveList[moveCount++] = BitMove(square, captureSquare, Pawn);
-                    }
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
             }
             if (file < 7) {
                 int captureSquare = square + 9;
                 if (captureSquare < 64 && (enemyPieces & (1ULL << captureSquare))) {
-                    if (moveCount < maxMoves) {
-                        moveList[moveCount++] = BitMove(square, captureSquare, Pawn);
-                    }
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
             }
-        } else { // Black pawns
+        }
+        else {
             int targetSquare = square - 8;
             if (targetSquare >= 0 && (emptySquares & (1ULL << targetSquare))) {
-                if (moveCount < maxMoves) {
-                    moveList[moveCount++] = BitMove(square, targetSquare, Pawn);
-                }
-
+                moves.push_back(BitMove(square, targetSquare, Pawn));
                 if (rank == 6) {
                     int doublePushSquare = square - 16;
                     if (emptySquares & (1ULL << doublePushSquare)) {
-                        if (moveCount < maxMoves) {
-                            moveList[moveCount++] = BitMove(square, doublePushSquare, Pawn);
-                        }
+                        moves.push_back(BitMove(square, doublePushSquare, Pawn));
                     }
                 }
             }
-            
-            // diagonal captures
-            if (file > 0) { // capture to the left
+
+            if (file > 0) {
                 int captureSquare = square - 9;
                 if (captureSquare >= 0 && (enemyPieces & (1ULL << captureSquare))) {
-                    if (moveCount < maxMoves) {
-                        moveList[moveCount++] = BitMove(square, captureSquare, Pawn);
-                    }
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
             }
-            if (file < 7) { //capture to the right
+            if (file < 7) {
                 int captureSquare = square - 7;
                 if (captureSquare >= 0 && (enemyPieces & (1ULL << captureSquare))) {
-                    if (moveCount < maxMoves) {
-                        moveList[moveCount++] = BitMove(square, captureSquare, Pawn);
-                    }
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
             }
         }
     });
 }
 
-void Chess::generateKnightMoves(BitMove* moveList, int& moveCount, int maxMoves)
+void Chess::generateKnightMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7])
 {
-    int currentPlayer = getCurrentPlayer()->playerNumber();
-    
-    uint64_t bitboards[2][7];
-    buildBitboards(bitboards);
-    
     uint64_t knights = bitboards[currentPlayer][Knight];
     uint64_t friendlyPieces = 0ULL;
-    
     for (int piece = Pawn; piece <= King; piece++) {
         friendlyPieces |= bitboards[currentPlayer][piece];
     }
-    
-    // KNIGHT PROCESSING
+
     BitboardElement knightBB(knights);
     knightBB.forEachBit([&](int square) {
-        if (moveCount >= maxMoves) return;
-        
-        // Get all knight moves from this square
-        uint64_t attacks = KnightAttacks[square];
-        
-        attacks &= ~friendlyPieces;
-
+        uint64_t attacks = KnightAttacks[square] & ~friendlyPieces;
         BitboardElement attackBB(attacks);
         attackBB.forEachBit([&](int targetSquare) {
-            if (moveCount < maxMoves) {
-                moveList[moveCount++] = BitMove(square, targetSquare, Knight);
-            }
+            moves.push_back(BitMove(square, targetSquare, Knight));
         });
     });
 }
 
-void Chess::generateKingMoves(BitMove* moveList, int& moveCount, int maxMoves)
+void Chess::generateKingMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7])
 {
-    int currentPlayer = getCurrentPlayer()->playerNumber();
-    
-    uint64_t bitboards[2][7];
-    buildBitboards(bitboards);
-    
-    uint64_t king = bitboards[currentPlayer][King];
+    uint64_t kings = bitboards[currentPlayer][King];
     uint64_t friendlyPieces = 0ULL;
-
     for (int piece = Pawn; piece <= King; piece++) {
         friendlyPieces |= bitboards[currentPlayer][piece];
     }
-    
-    // KING PROCESSING
-    BitboardElement kingBB(king);
+
+    BitboardElement kingBB(kings);
     kingBB.forEachBit([&](int square) {
-        if (moveCount >= maxMoves) return;
-        
-        uint64_t attacks = KingAttacks[square];
-        
-        attacks &= ~friendlyPieces;
-        
+        uint64_t attacks = KingAttacks[square] & ~friendlyPieces;
         BitboardElement attackBB(attacks);
         attackBB.forEachBit([&](int targetSquare) {
-            if (moveCount < maxMoves) {
-                moveList[moveCount++] = BitMove(square, targetSquare, King);
-            }
+            moves.push_back(BitMove(square, targetSquare, King));
         });
     });
+}
+
+void Chess::addSlidingMoves(std::vector<BitMove>& moves, ChessPiece pieceType, int currentPlayer, uint64_t pieces, uint64_t friendlyPieces, uint64_t enemyPieces)
+{
+    const int rookDirections[4][2] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
+    const int bishopDirections[4][2] = { {1,1}, {1,-1}, {-1,1}, {-1,-1} };
+
+    const int (*directions)[2] = nullptr;
+    int directionCount = 0;
+
+    if (pieceType == Rook) {
+        directions = rookDirections;
+        directionCount = 4;
+    }
+    else if (pieceType == Bishop) {
+        directions = bishopDirections;
+        directionCount = 4;
+    }
+    else {
+        static const int queenDirections[8][2] = {
+            {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {1,-1}, {-1,1}, {-1,-1}
+        };
+        directions = queenDirections;
+        directionCount = 8;
+    }
+
+    BitboardElement pieceBB(pieces);
+    pieceBB.forEachBit([&](int fromSquare) {
+        int fromX = fromSquare % 8;
+        int fromY = fromSquare / 8;
+
+        for (int d = 0; d < directionCount; d++) {
+            int x = fromX + directions[d][0];
+            int y = fromY + directions[d][1];
+
+            while (x >= 0 && x < 8 && y >= 0 && y < 8) {
+                int toSquare = y * 8 + x;
+                uint64_t targetMask = 1ULL << toSquare;
+
+                if (friendlyPieces & targetMask) {
+                    break;
+                }
+
+                moves.push_back(BitMove(fromSquare, toSquare, pieceType));
+
+                if (enemyPieces & targetMask) {
+                    break;
+                }
+
+                x += directions[d][0];
+                y += directions[d][1];
+            }
+        }
+    });
+}
+
+void Chess::generateRookMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7])
+{
+    uint64_t rooks = bitboards[currentPlayer][Rook];
+    uint64_t friendlyPieces = 0ULL;
+    uint64_t enemyPieces = 0ULL;
+    for (int piece = Pawn; piece <= King; piece++) {
+        friendlyPieces |= bitboards[currentPlayer][piece];
+        enemyPieces |= bitboards[1 - currentPlayer][piece];
+    }
+    addSlidingMoves(moves, Rook, currentPlayer, rooks, friendlyPieces, enemyPieces);
+}
+
+void Chess::generateBishopMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7])
+{
+    uint64_t bishops = bitboards[currentPlayer][Bishop];
+    uint64_t friendlyPieces = 0ULL;
+    uint64_t enemyPieces = 0ULL;
+    for (int piece = Pawn; piece <= King; piece++) {
+        friendlyPieces |= bitboards[currentPlayer][piece];
+        enemyPieces |= bitboards[1 - currentPlayer][piece];
+    }
+    addSlidingMoves(moves, Bishop, currentPlayer, bishops, friendlyPieces, enemyPieces);
+}
+
+void Chess::generateQueenMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7])
+{
+    uint64_t queens = bitboards[currentPlayer][Queen];
+    uint64_t friendlyPieces = 0ULL;
+    uint64_t enemyPieces = 0ULL;
+    for (int piece = Pawn; piece <= King; piece++) {
+        friendlyPieces |= bitboards[currentPlayer][piece];
+        enemyPieces |= bitboards[1 - currentPlayer][piece];
+    }
+    addSlidingMoves(moves, Queen, currentPlayer, queens, friendlyPieces, enemyPieces);
 }
 
 void Chess::stopGame()
