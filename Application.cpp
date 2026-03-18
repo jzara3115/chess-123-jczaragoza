@@ -61,6 +61,18 @@ namespace ClassGame {
                         game = new Chess();
                         game->setUpBoard();
                     }
+                    if (ImGui::Button("Start Chess vs AI (AI Black)")) {
+                        Chess* chess = new Chess();
+                        chess->setAIPlayerChoice(1);
+                        game = chess;
+                        game->setUpBoard();
+                    }
+                    if (ImGui::Button("Start Chess vs AI (AI White)")) {
+                        Chess* chess = new Chess();
+                        chess->setAIPlayerChoice(0);
+                        game = chess;
+                        game->setUpBoard();
+                    }
                 } else {
                     ImGui::Text("Current Player Number: %d", game->getCurrentPlayer()->playerNumber());
                     std::string stateString = game->stateString();

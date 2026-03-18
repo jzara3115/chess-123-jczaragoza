@@ -3,6 +3,29 @@ Jc Zaragoza
 CMPM 123
 3/2/26
 
+Update (3/16/26) - Negamax AI with Alpha/Beta
+
+For this milestone, I added a playable chess AI using Negamax with alpha/beta pruning. The AI search depth is set to 3 plies (`_searchDepth = 3`) and can be configured to play either side (White or Black).
+
+What I added:
+- `generateAllMoves()` now has a player-specific version (`generateAllMovesForPlayer(int playerNumber)`) so the search can generate moves independent of UI turn handling.
+- `negamax(depth, alpha, beta, playerNumber)` with alpha/beta cutoffs.
+- `findBestMove(depth, playerNumber)` to choose the move with the highest negamax score.
+- `evaluateBoard()` using material + piece-square tables from `Evaluate.h`.
+- `updateAI()` and `gameHasAI()` in `Chess` so AI moves are executed automatically on its turn.
+- UI start options for: human vs human, AI as Black, and AI as White.
+
+Challenges:
+- The biggest challenge was state restoration inside search. I fixed this by making `setStateString()` fully rebuild chess pieces (type, owner, tag, and position) from the board notation string so recursive search can safely apply and undo moves.
+- Another challenge was keeping the move generator reusable for both gameplay validation and search. I solved that by keeping the existing array-based `generateMoves(...)` wrapper while making `generateAllMoves()` the source of truth.
+
+Depth achieved:
+- Negamax depth 3 with alpha/beta pruning.
+
+How well it plays:
+- At depth 3 it makes legal tactical decisions, captures hanging pieces, and responds reasonably in opening/middlegame positions.
+- It is still limited because there is no check/checkmate detection and no castling/en passant/promotion logic yet, so endgame strength and king safety are not fully realistic.
+
 Update (3/9/26)
 
 A big part of this update was adding the required generateAllMoves() method, which gives a std::vector<BitMove> containing every legal move for the side to move. This gave me a clean interface for move generation while also making it easier to test and work with move lists. The flow stayed the same conceptually, I first build bitboards for both sides from the live board state, then make moves piece by piece for the player (pawn, knight, bishop, rook, queen, king), and then return the full list of legal destinations with generateAllMoves().

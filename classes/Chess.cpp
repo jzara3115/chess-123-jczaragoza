@@ -1,4 +1,5 @@
 #include "Chess.h"
+#include "Evaluate.h"
 #include <limits>
 #include <cmath>
 #include <iostream>
@@ -8,6 +9,8 @@
 Chess::Chess()
 {
     _grid = new Grid(8, 8);
+    _aiPlayerChoice = -1;
+    _searchDepth = 3;
 }
 
 Chess::~Chess()
@@ -44,6 +47,9 @@ Bit* Chess::PieceForPlayer(const int playerNumber, ChessPiece piece)
 void Chess::setUpBoard()
 {
     setNumberOfPlayers(2);
+    if (_aiPlayerChoice == 0 || _aiPlayerChoice == 1) {
+        setAIPlayer(_aiPlayerChoice);
+    }
     _gameOptions.rowX = 8;
     _gameOptions.rowY = 8;
 
@@ -51,6 +57,35 @@ void Chess::setUpBoard()
     FENtoBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR");
 
     startGame();
+}
+
+void Chess::setAIPlayerChoice(int playerNumber)
+{
+    _aiPlayerChoice = playerNumber;
+}
+
+bool Chess::gameHasAI()
+{
+    return _gameOptions.AIPlaying;
+}
+
+void Chess::updateAI()
+{
+    int currentPlayer = getCurrentPlayer()->playerNumber();
+    if (!_gameOptions.AIPlaying || !getCurrentPlayer()->isAIPlayer()) {
+        return;
+    }
+
+    std::vector<BitMove> moves = generateAllMovesForPlayer(currentPlayer);
+    if (moves.empty()) {
+        endTurn();
+        return;
+    }
+
+    BitMove bestMove = findBestMove(_searchDepth, currentPlayer);
+    if (applyMoveOnBoard(bestMove)) {
+        endTurn();
+    }
 }
 
 void Chess::testMoveGeneration()
@@ -216,7 +251,11 @@ void Chess::buildBitboards(uint64_t bitboards[2][7])
 
 std::vector<BitMove> Chess::generateAllMoves()
 {
-    int currentPlayer = getCurrentPlayer()->playerNumber();
+    return generateAllMovesForPlayer(getCurrentPlayer()->playerNumber());
+}
+
+std::vector<BitMove> Chess::generateAllMovesForPlayer(int currentPlayer)
+{
     uint64_t bitboards[2][7];
     buildBitboards(bitboards);
 
@@ -441,6 +480,323 @@ void Chess::generateQueenMoves(std::vector<BitMove>& moves, int currentPlayer, u
     addSlidingMoves(moves, Queen, currentPlayer, queens, friendlyPieces, enemyPieces);
 }
 
+int Chess::pieceSquareScore(ChessPiece piece, int square, int playerNumber) const
+{
+    int file = square % 8;
+    int rank = square / 8;
+    int index = (playerNumber == 0) ? square : ((7 - rank) * 8 + file);
+
+    switch (piece) {
+        case Pawn: return pawnTable[index];
+        case Knight: return knightTable[index];
+        case Bishop: return bishopTable[index];
+        case Rook: return rookTable[index];
+        case Queen: return queenTable[index];
+        case King: return kingTable[index];
+        default: return 0;
+    }
+}
+
+int Chess::evaluateBoard() const
+{
+    const int pieceValues[7] = { 0, 100, 320, 330, 500, 900, 20000 };
+    int score = 0;
+
+    _grid->forEachSquare([&](ChessSquare* square, int x, int y) {
+        Bit* bit = square->bit();
+        if (!bit) {
+            return;
+        }
+
+        int player = (bit->gameTag() & 128) ? 1 : 0;
+        ChessPiece piece = (ChessPiece)(bit->gameTag() & 0x7F);
+        int boardSquare = y * 8 + x;
+        int pieceScore = pieceValues[piece] + pieceSquareScore(piece, boardSquare, player);
+
+        score += (player == 0) ? pieceScore : -pieceScore;
+    });
+
+    return score;
+}
+
+int Chess::evaluateState(const std::string& state) const
+{
+    const int pieceValues[7] = { 0, 100, 320, 330, 500, 900, 20000 };
+    int score = 0;
+
+    for (int i = 0; i < 64 && i < (int)state.size(); i++) {
+        char c = state[i];
+        if (c == '0') {
+            continue;
+        }
+
+        int player = (c >= 'A' && c <= 'Z') ? 0 : 1;
+        ChessPiece piece = NoPiece;
+        switch ((char)std::toupper(c)) {
+            case 'P': piece = Pawn; break;
+            case 'N': piece = Knight; break;
+            case 'B': piece = Bishop; break;
+            case 'R': piece = Rook; break;
+            case 'Q': piece = Queen; break;
+            case 'K': piece = King; break;
+            default: piece = NoPiece; break;
+        }
+
+        if (piece == NoPiece) {
+            continue;
+        }
+
+        int pieceScore = pieceValues[piece] + pieceSquareScore(piece, i, player);
+        score += (player == 0) ? pieceScore : -pieceScore;
+    }
+
+    return score;
+}
+
+int Chess::evaluateForPlayer(int playerNumber) const
+{
+    int whitePerspective = evaluateBoard();
+    return playerNumber == 0 ? whitePerspective : -whitePerspective;
+}
+
+int Chess::evaluateStateForPlayer(const std::string& state, int playerNumber) const
+{
+    int whitePerspective = evaluateState(state);
+    return playerNumber == 0 ? whitePerspective : -whitePerspective;
+}
+
+bool Chess::applyMoveOnBoard(const BitMove& move)
+{
+    int fromX = move.from % 8;
+    int fromY = move.from / 8;
+    int toX = move.to % 8;
+    int toY = move.to / 8;
+
+    ChessSquare* fromSquare = _grid->getSquare(fromX, fromY);
+    ChessSquare* toSquare = _grid->getSquare(toX, toY);
+    if (!fromSquare || !toSquare) {
+        return false;
+    }
+
+    Bit* movingBit = fromSquare->bit();
+    if (!movingBit) {
+        return false;
+    }
+
+    // Move destination first so the source holder does not delete the moving piece.
+    // BitHolder::setBit(nullptr) deletes its current bit, so clearing source first is unsafe here.
+    toSquare->setBit(movingBit);
+    movingBit->setParent(toSquare);
+    movingBit->moveTo(toSquare->getPosition());
+
+    // Ensure source holder releases stale pointer to moved piece.
+    fromSquare->bit();
+
+    return true;
+}
+
+std::string Chess::applyMoveToState(const std::string& state, const BitMove& move) const
+{
+    std::string next = state;
+    if (move.from < next.size() && move.to < next.size()) {
+        next[move.to] = next[move.from];
+        next[move.from] = '0';
+    }
+    return next;
+}
+
+std::vector<BitMove> Chess::generateAllMovesForPlayerFromState(const std::string& state, int currentPlayer) const
+{
+    std::vector<BitMove> moves;
+    moves.reserve(256);
+
+    auto isFriendly = [&](char p) {
+        if (p == '0') return false;
+        return currentPlayer == 0 ? (p >= 'A' && p <= 'Z') : (p >= 'a' && p <= 'z');
+    };
+    auto isEnemy = [&](char p) {
+        if (p == '0') return false;
+        return currentPlayer == 0 ? (p >= 'a' && p <= 'z') : (p >= 'A' && p <= 'Z');
+    };
+
+    for (int from = 0; from < 64 && from < (int)state.size(); from++) {
+        char pieceChar = state[from];
+        if (!isFriendly(pieceChar)) {
+            continue;
+        }
+
+        int file = from % 8;
+        int rank = from / 8;
+        ChessPiece piece = NoPiece;
+        switch ((char)std::toupper(pieceChar)) {
+            case 'P': piece = Pawn; break;
+            case 'N': piece = Knight; break;
+            case 'B': piece = Bishop; break;
+            case 'R': piece = Rook; break;
+            case 'Q': piece = Queen; break;
+            case 'K': piece = King; break;
+            default: piece = NoPiece; break;
+        }
+
+        if (piece == Pawn) {
+            if (currentPlayer == 0) {
+                int one = from + 8;
+                if (one < 64 && state[one] == '0') {
+                    moves.push_back(BitMove(from, one, Pawn));
+                    int two = from + 16;
+                    if (rank == 1 && two < 64 && state[two] == '0') {
+                        moves.push_back(BitMove(from, two, Pawn));
+                    }
+                }
+                int capL = from + 7;
+                int capR = from + 9;
+                if (file > 0 && capL < 64 && isEnemy(state[capL])) {
+                    moves.push_back(BitMove(from, capL, Pawn));
+                }
+                if (file < 7 && capR < 64 && isEnemy(state[capR])) {
+                    moves.push_back(BitMove(from, capR, Pawn));
+                }
+            }
+            else {
+                int one = from - 8;
+                if (one >= 0 && state[one] == '0') {
+                    moves.push_back(BitMove(from, one, Pawn));
+                    int two = from - 16;
+                    if (rank == 6 && two >= 0 && state[two] == '0') {
+                        moves.push_back(BitMove(from, two, Pawn));
+                    }
+                }
+                int capL = from - 9;
+                int capR = from - 7;
+                if (file > 0 && capL >= 0 && isEnemy(state[capL])) {
+                    moves.push_back(BitMove(from, capL, Pawn));
+                }
+                if (file < 7 && capR >= 0 && isEnemy(state[capR])) {
+                    moves.push_back(BitMove(from, capR, Pawn));
+                }
+            }
+        }
+        else if (piece == Knight) {
+            uint64_t attacks = KnightAttacks[from];
+            BitboardElement attackBB(attacks);
+            attackBB.forEachBit([&](int to) {
+                if (to >= 0 && to < 64 && !isFriendly(state[to])) {
+                    moves.push_back(BitMove(from, to, Knight));
+                }
+            });
+        }
+        else if (piece == King) {
+            uint64_t attacks = KingAttacks[from];
+            BitboardElement attackBB(attacks);
+            attackBB.forEachBit([&](int to) {
+                if (to >= 0 && to < 64 && !isFriendly(state[to])) {
+                    moves.push_back(BitMove(from, to, King));
+                }
+            });
+        }
+        else {
+            static const int rookDirs[4][2] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
+            static const int bishopDirs[4][2] = { {1,1}, {1,-1}, {-1,1}, {-1,-1} };
+            static const int queenDirs[8][2] = {
+                {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {1,-1}, {-1,1}, {-1,-1}
+            };
+
+            const int (*dirs)[2] = nullptr;
+            int dirCount = 0;
+            if (piece == Rook) {
+                dirs = rookDirs;
+                dirCount = 4;
+            }
+            else if (piece == Bishop) {
+                dirs = bishopDirs;
+                dirCount = 4;
+            }
+            else if (piece == Queen) {
+                dirs = queenDirs;
+                dirCount = 8;
+            }
+
+            for (int d = 0; d < dirCount; d++) {
+                int x = file + dirs[d][0];
+                int y = rank + dirs[d][1];
+                while (x >= 0 && x < 8 && y >= 0 && y < 8) {
+                    int to = y * 8 + x;
+                    if (isFriendly(state[to])) {
+                        break;
+                    }
+                    moves.push_back(BitMove(from, to, piece));
+                    if (isEnemy(state[to])) {
+                        break;
+                    }
+                    x += dirs[d][0];
+                    y += dirs[d][1];
+                }
+            }
+        }
+    }
+
+    return moves;
+}
+
+int Chess::negamax(const std::string& state, int depth, int alpha, int beta, int playerNumber)
+{
+    if (depth == 0) {
+        return evaluateStateForPlayer(state, playerNumber);
+    }
+
+    std::vector<BitMove> moves = generateAllMovesForPlayerFromState(state, playerNumber);
+    if (moves.empty()) {
+        return evaluateStateForPlayer(state, playerNumber);
+    }
+
+    int bestScore = std::numeric_limits<int>::min() / 2;
+    for (const BitMove& move : moves) {
+        std::string nextState = applyMoveToState(state, move);
+        int score = -negamax(nextState, depth - 1, -beta, -alpha, 1 - playerNumber);
+
+        if (score > bestScore) {
+            bestScore = score;
+        }
+        if (score > alpha) {
+            alpha = score;
+        }
+        if (alpha >= beta) {
+            break;
+        }
+    }
+
+    return bestScore;
+}
+
+BitMove Chess::findBestMove(int depth, int playerNumber)
+{
+    std::string rootState = stateString();
+    std::vector<BitMove> moves = generateAllMovesForPlayerFromState(rootState, playerNumber);
+    if (moves.empty()) {
+        return BitMove();
+    }
+
+    int alpha = std::numeric_limits<int>::min() / 2;
+    int beta = std::numeric_limits<int>::max() / 2;
+    int bestScore = std::numeric_limits<int>::min() / 2;
+    BitMove bestMove = moves[0];
+
+    for (const BitMove& move : moves) {
+        std::string nextState = applyMoveToState(rootState, move);
+        int score = -negamax(nextState, depth - 1, -beta, -alpha, 1 - playerNumber);
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = move;
+        }
+        if (score > alpha) {
+            alpha = score;
+        }
+    }
+
+    return bestMove;
+}
+
 void Chess::stopGame()
 {
     _grid->forEachSquare([](ChessSquare* square, int x, int y) {
@@ -490,11 +846,33 @@ void Chess::setStateString(const std::string &s)
 {
     _grid->forEachSquare([&](ChessSquare* square, int x, int y) {
         int index = y * 8 + x;
-        char playerNumber = s[index] - '0';
-        if (playerNumber) {
-            square->setBit(PieceForPlayer(playerNumber - 1, Pawn));
-        } else {
+        char pieceChar = (index < (int)s.size()) ? s[index] : '0';
+        if (pieceChar == '0') {
             square->setBit(nullptr);
+            return;
         }
+
+        int playerNumber = (pieceChar >= 'A' && pieceChar <= 'Z') ? 0 : 1;
+        ChessPiece pieceType = NoPiece;
+        switch ((char)std::toupper(pieceChar)) {
+            case 'P': pieceType = Pawn; break;
+            case 'N': pieceType = Knight; break;
+            case 'B': pieceType = Bishop; break;
+            case 'R': pieceType = Rook; break;
+            case 'Q': pieceType = Queen; break;
+            case 'K': pieceType = King; break;
+            default: pieceType = NoPiece; break;
+        }
+
+        if (pieceType == NoPiece) {
+            square->setBit(nullptr);
+            return;
+        }
+
+        Bit* piece = PieceForPlayer(playerNumber, pieceType);
+        piece->setGameTag(pieceType + (playerNumber * 128));
+        square->setBit(piece);
+        piece->setParent(square);
+        piece->moveTo(square->getPosition());
     });
 }
