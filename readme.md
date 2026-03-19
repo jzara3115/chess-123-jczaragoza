@@ -3,28 +3,27 @@ Jc Zaragoza
 CMPM 123
 3/2/26
 
+Update (3/18/26)
+
+I focused on adding the special moves. pawn promotion, en passant, and castling. I also added a end condition where when the king is taken, the game is officially over and no player can move anymore. This was important because it made the game flow line up better with the assignment goals and made testing easier to reason about.
+
+For promotion, I implemented automatic pawn promotion to a queen when a pawn reaches the back rank. This works for both white and black. For en passant, I added tracking for an enpassant target square after a two-square pawn move. Then in pawn move generation I added the enpassant capture move only when that square is available, and in move resolution I remove the captured pawn from the correct adjacent square. For castling, I added castling rights tracking for both sides and both directions (white king side/queen side and black king side/queen side). King move generation now adds castling moves when the path is clear and rights still exist. Then during move application, if the king castles, the rook is moved automatically to the correct square. I also updated castling rights when a king moves, when a rook moves, and when a rook is taken on a square the rook started at.
+
+The main challenge here was keeping these rules for both human drag/drop moves and AI-generated moves. To solve that, I made side effects (promotion, en passant capture cleanup, castling rook shift, rights updates, king-capture winner lock) into shared post move logic so both paths can follow the same rules.
+
+I also added a Chess Test Panel in the UI with one-click FEN scenario buttons for castling, en passant, promotion, and king-capture board placements. That made debugging and validating edge cases way faster than manually setting up positions move-by-move.
+
 Update (3/16/26) - Negamax AI with Alpha/Beta
 
-For this milestone, I added a playable chess AI using Negamax with alpha/beta pruning. The AI search depth is set to 3 plies (`_searchDepth = 3`) and can be configured to play either side (White or Black).
+For this milestone, I added a chess AI using the Negamax search with alpha/beta pruning. The AI is set to search to a depth of 3 plies (_searchDepth = 3), and I made it flexible so it can play as White or Black depending on the mode. The main goal was to integrate a real decision-making loop into the existing chess framework without breaking the turn-based gameplay flow or the move validation system.
 
-What I added:
-- `generateAllMoves()` now has a player-specific version (`generateAllMovesForPlayer(int playerNumber)`) so the search can generate moves independent of UI turn handling.
-- `negamax(depth, alpha, beta, playerNumber)` with alpha/beta cutoffs.
-- `findBestMove(depth, playerNumber)` to choose the move with the highest negamax score.
-- `evaluateBoard()` using material + piece-square tables from `Evaluate.h`.
-- `updateAI()` and `gameHasAI()` in `Chess` so AI moves are executed automatically on its turn.
-- UI start options for: human vs human, AI as Black, and AI as White.
+To support search properly, I extended the move generation system so it could operate independently from UI turn handling. I added a player-specific move generator, generateAllMovesForPlayer(int playerNumber), which lets the AI generate moves for either side at any point in the search tree. I also added negamax(depth, alpha, beta, playerNumber) as the core recursive algorithm, using alpha/beta cutoffs to prune branches that canr improve the result. Then I wrote findBestMove(depth, playerNumber) to evaluate all candidate moves and select the one with the highest negamax score.
 
-Challenges:
-- The biggest challenge was state restoration inside search. I fixed this by making `setStateString()` fully rebuild chess pieces (type, owner, tag, and position) from the board notation string so recursive search can safely apply and undo moves.
-- Another challenge was keeping the move generator reusable for both gameplay validation and search. I solved that by keeping the existing array-based `generateMoves(...)` wrapper while making `generateAllMoves()` the source of truth.
+To make the search powerful enough, I added an evaluateBoard() function based on a combination of material scoring and piece-square tables, using values from Evaluate.h. This gave the AI a basic sense of poisitioning instead of only valuing captures. For gameplay, I added updateAI() and gameHasAI() in Chess so the AI automatically makes a move when it is the AI-controlled side’s turn. I also added UI start options so the game can be launched in three modes, human vs human, AI as Black, or AI as White.
 
-Depth achieved:
-- Negamax depth 3 with alpha/beta pruning.
+The biggest challenge was state restoration during recursive search. Since the AI needs to make moves, evaluate future positions, and then undo those moves, I needed a good way to restore the board without leaving corrupted pieces. I solved this by improving setStateString() so it fully rebuilds chess pieces (type, owner, tag, and position) from the board notation string. With that in place, the search can safely change the board state, recurse, and return back up the tree without errors or ghost pieces.
 
-How well it plays:
-- At depth 3 it makes legal tactical decisions, captures hanging pieces, and responds reasonably in opening/middlegame positions.
-- It is still limited because there is no check/checkmate detection and no castling/en passant/promotion logic yet, so endgame strength and king safety are not fully realistic.
+At depth 3, the AI plays legally and can make reasonable choices, like capturing hanging pieces and responding in a lot of opening and middlegame positions. But its strength is still limited by the current rule scope and depth.
 
 Update (3/9/26)
 

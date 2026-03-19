@@ -5,12 +5,14 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <sstream>
 
 Chess::Chess()
 {
     _grid = new Grid(8, 8);
     _aiPlayerChoice = -1;
     _searchDepth = 3;
+    resetSpecialMoveState();
 }
 
 Chess::~Chess()
@@ -55,13 +57,59 @@ void Chess::setUpBoard()
 
     _grid->initializeChessSquares(pieceSize, "boardsquare.png");
     FENtoBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR");
+    resetSpecialMoveState();
 
     startGame();
+}
+
+void Chess::resetSpecialMoveState()
+{
+    _enPassantSquare = -1;
+    _whiteCastleKingSide = true;
+    _whiteCastleQueenSide = true;
+    _blackCastleKingSide = true;
+    _blackCastleQueenSide = true;
+    _lastCapturedPieceType = NoPiece;
+    _forcedWinner = nullptr;
 }
 
 void Chess::setAIPlayerChoice(int playerNumber)
 {
     _aiPlayerChoice = playerNumber;
+}
+
+void Chess::loadPositionFromFEN(const std::string& fen)
+{
+    FENtoBoard(fen);
+    resetSpecialMoveState();
+
+    std::istringstream iss(fen);
+    std::string boardPart;
+    std::string activeColor;
+    std::string castling;
+    std::string enPassant;
+    iss >> boardPart >> activeColor >> castling >> enPassant;
+
+    if (activeColor == "b") {
+        _gameOptions.currentTurnNo = 1;
+    } else if (activeColor == "w") {
+        _gameOptions.currentTurnNo = 0;
+    }
+
+    if (!castling.empty()) {
+        _whiteCastleKingSide = castling.find('K') != std::string::npos;
+        _whiteCastleQueenSide = castling.find('Q') != std::string::npos;
+        _blackCastleKingSide = castling.find('k') != std::string::npos;
+        _blackCastleQueenSide = castling.find('q') != std::string::npos;
+    }
+
+    if (!enPassant.empty() && enPassant != "-" && enPassant.size() == 2) {
+        int file = enPassant[0] - 'a';
+        int rank = enPassant[1] - '1';
+        if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
+            _enPassantSquare = rank * 8 + file;
+        }
+    }
 }
 
 bool Chess::gameHasAI()
@@ -72,6 +120,9 @@ bool Chess::gameHasAI()
 void Chess::updateAI()
 {
     int currentPlayer = getCurrentPlayer()->playerNumber();
+    if (_forcedWinner) {
+        return;
+    }
     if (!_gameOptions.AIPlaying || !getCurrentPlayer()->isAIPlayer()) {
         return;
     }
@@ -88,6 +139,19 @@ void Chess::updateAI()
     }
 }
 
+void Chess::pieceTaken(Bit *bit)
+{
+    if (!bit) {
+        return;
+    }
+
+    ChessPiece captured = (ChessPiece)(bit->gameTag() & 0x7F);
+    _lastCapturedPieceType = captured;
+    if (captured == King) {
+        _forcedWinner = getCurrentPlayer();
+    }
+}
+
 void Chess::testMoveGeneration()
 {
     BitMove moveList[256];
@@ -96,7 +160,7 @@ void Chess::testMoveGeneration()
     std::cout << "Generated " << moveCount << " moves for " 
               << (getCurrentPlayer()->playerNumber() == 0 ? "White" : "Black") << "\n\n";
     
-    // Print first 20 moves
+    // first 20 moves
     int movesToPrint = moveCount < 20 ? moveCount : 20;
     for (int i = 0; i < movesToPrint; i++) {
         int fromFile = moveList[i].from % 8;
@@ -116,6 +180,114 @@ void Chess::testMoveGeneration()
     }
 }
 
+void Chess::bitMovedFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
+{
+    ChessSquare* srcSquare = dynamic_cast<ChessSquare*>(&src);
+    ChessSquare* dstSquare = dynamic_cast<ChessSquare*>(&dst);
+    if (!srcSquare || !dstSquare) {
+        endTurn();
+        return;
+    }
+
+    int fromSquare = srcSquare->getSquareIndex();
+    int toSquare = dstSquare->getSquareIndex();
+    int movingPlayer = (bit.gameTag() & 128) ? 1 : 0;
+    ChessPiece movedPiece = (ChessPiece)(bit.gameTag() & 0x7F);
+    bool destinationWasOccupied = (_lastCapturedPieceType != NoPiece);
+    ChessPiece capturedType = _lastCapturedPieceType;
+
+    applyPostMoveRules(fromSquare, toSquare, movedPiece, movingPlayer, destinationWasOccupied, capturedType);
+    _lastCapturedPieceType = NoPiece;
+    endTurn();
+}
+
+void Chess::applyPostMoveRules(int fromSquare, int toSquare, ChessPiece movedPiece, int movingPlayer, bool destinationWasOccupied, ChessPiece capturedPieceType)
+{
+    int fromX = fromSquare % 8;
+    int fromY = fromSquare / 8;
+    int toX = toSquare % 8;
+    int toY = toSquare / 8;
+
+    if (capturedPieceType == King) {
+        _forcedWinner = getPlayerAt(movingPlayer);
+    }
+
+    if (capturedPieceType == Rook) {
+        if (toSquare == 0) _whiteCastleQueenSide = false;
+        if (toSquare == 7) _whiteCastleKingSide = false;
+        if (toSquare == 56) _blackCastleQueenSide = false;
+        if (toSquare == 63) _blackCastleKingSide = false;
+    }
+
+    // Reset en-passant
+    _enPassantSquare = -1;
+
+    if (movedPiece == Pawn) {
+        // En-passant capture
+        if (!destinationWasOccupied && std::abs(toX - fromX) == 1) {
+            int capturedY = movingPlayer == 0 ? (toY - 1) : (toY + 1);
+            if (capturedY >= 0 && capturedY < 8) {
+                ChessSquare* capturedSq = _grid->getSquare(toX, capturedY);
+                if (capturedSq && capturedSq->bit()) {
+                    ChessPiece cap = (ChessPiece)(capturedSq->bit()->gameTag() & 0x7F);
+                    int capPlayer = (capturedSq->bit()->gameTag() & 128) ? 1 : 0;
+                    if (cap == Pawn && capPlayer != movingPlayer) {
+                        capturedSq->destroyBit();
+                    }
+                }
+            }
+        }
+
+        if (std::abs(toY - fromY) == 2) {
+            _enPassantSquare = movingPlayer == 0 ? (fromSquare + 8) : (fromSquare - 8);
+        }
+
+        // Auto-queen promotion
+        if ((movingPlayer == 0 && toY == 7) || (movingPlayer == 1 && toY == 0)) {
+            ChessSquare* dstSq = _grid->getSquare(toX, toY);
+            if (dstSq) {
+                Bit* promoted = PieceForPlayer(movingPlayer, Queen);
+                promoted->setGameTag(Queen + (movingPlayer * 128));
+                dstSq->setBit(promoted);
+                promoted->setParent(dstSq);
+                promoted->moveTo(dstSq->getPosition());
+            }
+        }
+    }
+
+    if (movedPiece == King) {
+        if (movingPlayer == 0) {
+            _whiteCastleKingSide = false;
+            _whiteCastleQueenSide = false;
+        } else {
+            _blackCastleKingSide = false;
+            _blackCastleQueenSide = false;
+        }
+
+        // Castling rook move when king moves two tile
+        if (std::abs(toX - fromX) == 2) {
+            int rookFromX = (toX > fromX) ? 7 : 0;
+            int rookToX = (toX > fromX) ? (toX - 1) : (toX + 1);
+            ChessSquare* rookFrom = _grid->getSquare(rookFromX, fromY);
+            ChessSquare* rookTo = _grid->getSquare(rookToX, fromY);
+            if (rookFrom && rookTo && rookFrom->bit()) {
+                Bit* rook = rookFrom->bit();
+                rookTo->setBit(rook);
+                rook->setParent(rookTo);
+                rook->moveTo(rookTo->getPosition());
+                rookFrom->bit();
+            }
+        }
+    }
+
+    if (movedPiece == Rook) {
+        if (fromSquare == 0) _whiteCastleQueenSide = false;
+        if (fromSquare == 7) _whiteCastleKingSide = false;
+        if (fromSquare == 56) _blackCastleQueenSide = false;
+        if (fromSquare == 63) _blackCastleKingSide = false;
+    }
+}
+
 
 void Chess::FENtoBoard(const std::string& fen) {
     
@@ -131,7 +303,7 @@ void Chess::FENtoBoard(const std::string& fen) {
     
     // Within each rank, goes from file a (x=0) to file h (x=7)
     int x = 0;
-    int y = 7;  //top rank
+    int y = 7;
     
     for (char c : boardPosition) {
         if (c == '/') {
@@ -179,6 +351,9 @@ bool Chess::actionForEmptyHolder(BitHolder &holder)
 
 bool Chess::canBitMoveFrom(Bit &bit, BitHolder &src)
 {
+    if (_forcedWinner) {
+        return false;
+    }
     // need to implement friendly/unfriendly in bit so for now this hack
     int currentPlayer = getCurrentPlayer()->playerNumber() * 128;
     int pieceColor = bit.gameTag() & 128;
@@ -188,6 +363,10 @@ bool Chess::canBitMoveFrom(Bit &bit, BitHolder &src)
 
 bool Chess::canBitMoveFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
 {
+    if (_forcedWinner) {
+        return false;
+    }
+
     ChessSquare* srcSquare = dynamic_cast<ChessSquare*>(&src);
     ChessSquare* dstSquare = dynamic_cast<ChessSquare*>(&dst);
     
@@ -234,7 +413,7 @@ void Chess::buildBitboards(uint64_t bitboards[2][7])
         }
     }
     
-    //Scan the board and populate it
+    //Scan the board and fill it
     _grid->forEachSquare([&](ChessSquare* square, int x, int y) {
         Bit* bit = square->bit();
         if (bit) {
@@ -251,11 +430,17 @@ void Chess::buildBitboards(uint64_t bitboards[2][7])
 
 std::vector<BitMove> Chess::generateAllMoves()
 {
+    if (_forcedWinner) {
+        return {};
+    }
     return generateAllMovesForPlayer(getCurrentPlayer()->playerNumber());
 }
 
 std::vector<BitMove> Chess::generateAllMovesForPlayer(int currentPlayer)
 {
+    if (_forcedWinner) {
+        return {};
+    }
     uint64_t bitboards[2][7];
     buildBitboards(bitboards);
 
@@ -318,10 +503,16 @@ void Chess::generatePawnMoves(std::vector<BitMove>& moves, int currentPlayer, ui
                 if (captureSquare < 64 && (enemyPieces & (1ULL << captureSquare))) {
                     moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
+                if (_enPassantSquare == captureSquare) {
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
+                }
             }
             if (file < 7) {
                 int captureSquare = square + 9;
                 if (captureSquare < 64 && (enemyPieces & (1ULL << captureSquare))) {
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
+                }
+                if (_enPassantSquare == captureSquare) {
                     moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
             }
@@ -343,10 +534,16 @@ void Chess::generatePawnMoves(std::vector<BitMove>& moves, int currentPlayer, ui
                 if (captureSquare >= 0 && (enemyPieces & (1ULL << captureSquare))) {
                     moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
+                if (_enPassantSquare == captureSquare) {
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
+                }
             }
             if (file < 7) {
                 int captureSquare = square - 7;
                 if (captureSquare >= 0 && (enemyPieces & (1ULL << captureSquare))) {
+                    moves.push_back(BitMove(square, captureSquare, Pawn));
+                }
+                if (_enPassantSquare == captureSquare) {
                     moves.push_back(BitMove(square, captureSquare, Pawn));
                 }
             }
@@ -387,6 +584,46 @@ void Chess::generateKingMoves(std::vector<BitMove>& moves, int currentPlayer, ui
         attackBB.forEachBit([&](int targetSquare) {
             moves.push_back(BitMove(square, targetSquare, King));
         });
+
+        // Castling
+        int y = square / 8;
+        int x = square % 8;
+        if (currentPlayer == 0 && x == 4 && y == 0) {
+            if (_whiteCastleKingSide) {
+                if (!_grid->getSquare(5, 0)->bit() && !_grid->getSquare(6, 0)->bit()) {
+                    ChessSquare* rookSq = _grid->getSquare(7, 0);
+                    if (rookSq && rookSq->bit() && ((rookSq->bit()->gameTag() & 0x7F) == Rook)) {
+                        moves.push_back(BitMove(square, 6, King));
+                    }
+                }
+            }
+            if (_whiteCastleQueenSide) {
+                if (!_grid->getSquare(1, 0)->bit() && !_grid->getSquare(2, 0)->bit() && !_grid->getSquare(3, 0)->bit()) {
+                    ChessSquare* rookSq = _grid->getSquare(0, 0);
+                    if (rookSq && rookSq->bit() && ((rookSq->bit()->gameTag() & 0x7F) == Rook)) {
+                        moves.push_back(BitMove(square, 2, King));
+                    }
+                }
+            }
+        }
+        if (currentPlayer == 1 && x == 4 && y == 7) {
+            if (_blackCastleKingSide) {
+                if (!_grid->getSquare(5, 7)->bit() && !_grid->getSquare(6, 7)->bit()) {
+                    ChessSquare* rookSq = _grid->getSquare(7, 7);
+                    if (rookSq && rookSq->bit() && ((rookSq->bit()->gameTag() & 0x7F) == Rook)) {
+                        moves.push_back(BitMove(square, 62, King));
+                    }
+                }
+            }
+            if (_blackCastleQueenSide) {
+                if (!_grid->getSquare(1, 7)->bit() && !_grid->getSquare(2, 7)->bit() && !_grid->getSquare(3, 7)->bit()) {
+                    ChessSquare* rookSq = _grid->getSquare(0, 7);
+                    if (rookSq && rookSq->bit() && ((rookSq->bit()->gameTag() & 0x7F) == Rook)) {
+                        moves.push_back(BitMove(square, 58, King));
+                    }
+                }
+            }
+        }
     });
 }
 
@@ -583,14 +820,21 @@ bool Chess::applyMoveOnBoard(const BitMove& move)
         return false;
     }
 
-    // Move destination first so the source holder does not delete the moving piece.
-    // BitHolder::setBit(nullptr) deletes its current bit, so clearing source first is unsafe here.
+    bool destinationWasOccupied = (toSquare->bit() != nullptr);
+    ChessPiece capturedType = NoPiece;
+    if (destinationWasOccupied) {
+        capturedType = (ChessPiece)(toSquare->bit()->gameTag() & 0x7F);
+    }
+    int movingPlayer = (movingBit->gameTag() & 128) ? 1 : 0;
+    ChessPiece movedPiece = (ChessPiece)(movingBit->gameTag() & 0x7F);
+
     toSquare->setBit(movingBit);
     movingBit->setParent(toSquare);
     movingBit->moveTo(toSquare->getPosition());
 
-    // Ensure source holder releases stale pointer to moved piece.
     fromSquare->bit();
+
+    applyPostMoveRules(move.from, move.to, movedPiece, movingPlayer, destinationWasOccupied, capturedType);
 
     return true;
 }
@@ -653,7 +897,13 @@ std::vector<BitMove> Chess::generateAllMovesForPlayerFromState(const std::string
                 if (file > 0 && capL < 64 && isEnemy(state[capL])) {
                     moves.push_back(BitMove(from, capL, Pawn));
                 }
+                if (file > 0 && capL == _enPassantSquare) {
+                    moves.push_back(BitMove(from, capL, Pawn));
+                }
                 if (file < 7 && capR < 64 && isEnemy(state[capR])) {
+                    moves.push_back(BitMove(from, capR, Pawn));
+                }
+                if (file < 7 && capR == _enPassantSquare) {
                     moves.push_back(BitMove(from, capR, Pawn));
                 }
             }
@@ -671,7 +921,13 @@ std::vector<BitMove> Chess::generateAllMovesForPlayerFromState(const std::string
                 if (file > 0 && capL >= 0 && isEnemy(state[capL])) {
                     moves.push_back(BitMove(from, capL, Pawn));
                 }
+                if (file > 0 && capL == _enPassantSquare) {
+                    moves.push_back(BitMove(from, capL, Pawn));
+                }
                 if (file < 7 && capR >= 0 && isEnemy(state[capR])) {
+                    moves.push_back(BitMove(from, capR, Pawn));
+                }
+                if (file < 7 && capR == _enPassantSquare) {
                     moves.push_back(BitMove(from, capR, Pawn));
                 }
             }
@@ -693,6 +949,24 @@ std::vector<BitMove> Chess::generateAllMovesForPlayerFromState(const std::string
                     moves.push_back(BitMove(from, to, King));
                 }
             });
+
+            // Castling in search generator
+            if (currentPlayer == 0 && from == 4) {
+                if (_whiteCastleKingSide && state[5] == '0' && state[6] == '0' && state[7] == 'R') {
+                    moves.push_back(BitMove(4, 6, King));
+                }
+                if (_whiteCastleQueenSide && state[1] == '0' && state[2] == '0' && state[3] == '0' && state[0] == 'R') {
+                    moves.push_back(BitMove(4, 2, King));
+                }
+            }
+            if (currentPlayer == 1 && from == 60) {
+                if (_blackCastleKingSide && state[61] == '0' && state[62] == '0' && state[63] == 'r') {
+                    moves.push_back(BitMove(60, 62, King));
+                }
+                if (_blackCastleQueenSide && state[57] == '0' && state[58] == '0' && state[59] == '0' && state[56] == 'r') {
+                    moves.push_back(BitMove(60, 58, King));
+                }
+            }
         }
         else {
             static const int rookDirs[4][2] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
@@ -802,6 +1076,7 @@ void Chess::stopGame()
     _grid->forEachSquare([](ChessSquare* square, int x, int y) {
         square->destroyBit();
     });
+    resetSpecialMoveState();
 }
 
 Player* Chess::ownerAt(int x, int y) const
@@ -819,6 +1094,37 @@ Player* Chess::ownerAt(int x, int y) const
 
 Player* Chess::checkForWinner()
 {
+    if (_forcedWinner) {
+        return _forcedWinner;
+    }
+
+    bool whiteKing = false;
+    bool blackKing = false;
+    _grid->forEachSquare([&](ChessSquare* square, int x, int y) {
+        if (!square->bit()) {
+            return;
+        }
+        ChessPiece p = (ChessPiece)(square->bit()->gameTag() & 0x7F);
+        if (p != King) {
+            return;
+        }
+        int owner = (square->bit()->gameTag() & 128) ? 1 : 0;
+        if (owner == 0) {
+            whiteKing = true;
+        } else {
+            blackKing = true;
+        }
+    });
+
+    if (!whiteKing && blackKing) {
+        _forcedWinner = getPlayerAt(1);
+        return _forcedWinner;
+    }
+    if (!blackKing && whiteKing) {
+        _forcedWinner = getPlayerAt(0);
+        return _forcedWinner;
+    }
+
     return nullptr;
 }
 

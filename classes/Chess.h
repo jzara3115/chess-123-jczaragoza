@@ -27,6 +27,8 @@ public:
     void setUpBoard() override;
     bool gameHasAI() override;
     void updateAI() override;
+    void bitMovedFromTo(Bit &bit, BitHolder &src, BitHolder &dst) override;
+    void pieceTaken(Bit *bit) override;
 
     bool canBitMoveFrom(Bit &bit, BitHolder &src) override;
     bool canBitMoveFromTo(Bit &bit, BitHolder &src, BitHolder &dst) override;
@@ -55,8 +57,9 @@ public:
     void generateQueenMoves(std::vector<BitMove>& moves, int currentPlayer, uint64_t bitboards[2][7]);
     void testMoveGeneration();
 
-    // Configure whether AI plays White (0) or Black (1). Use -1 for human vs human.
+    // set whether AI plays White (0) or Black (1). -1 for human vs human.
     void setAIPlayerChoice(int playerNumber);
+    void loadPositionFromFEN(const std::string& fen);
 
 private:
     Bit* PieceForPlayer(const int playerNumber, ChessPiece piece);
@@ -78,8 +81,17 @@ private:
     std::string applyMoveToState(const std::string& state, const BitMove& move) const;
     std::vector<BitMove> generateAllMovesForPlayerFromState(const std::string& state, int currentPlayer) const;
     BitMove findBestMove(int depth, int playerNumber);
+    void applyPostMoveRules(int fromSquare, int toSquare, ChessPiece movedPiece, int movingPlayer, bool destinationWasOccupied, ChessPiece capturedPieceType);
+    void resetSpecialMoveState();
 
     Grid* _grid;
     int _aiPlayerChoice;
     int _searchDepth;
+    int _enPassantSquare;
+    bool _whiteCastleKingSide;
+    bool _whiteCastleQueenSide;
+    bool _blackCastleKingSide;
+    bool _blackCastleQueenSide;
+    ChessPiece _lastCapturedPieceType;
+    Player* _forcedWinner;
 };

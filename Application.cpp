@@ -35,7 +35,6 @@ namespace ClassGame {
                 ImGui::Begin("Settings");
 
                 if (gameOver) {
-                    ImGui::Text("Game Over!");
                     ImGui::Text("Winner: %d", gameWinner);
                     if (ImGui::Button("Reset Game")) {
                         game->stopGame();
@@ -61,13 +60,13 @@ namespace ClassGame {
                         game = new Chess();
                         game->setUpBoard();
                     }
-                    if (ImGui::Button("Start Chess vs AI (AI Black)")) {
+                    if (ImGui::Button("Chess vs AI (Black)")) {
                         Chess* chess = new Chess();
                         chess->setAIPlayerChoice(1);
                         game = chess;
                         game->setUpBoard();
                     }
-                    if (ImGui::Button("Start Chess vs AI (AI White)")) {
+                    if (ImGui::Button("Chess vs AI (White)")) {
                         Chess* chess = new Chess();
                         chess->setAIPlayerChoice(0);
                         game = chess;
@@ -88,6 +87,24 @@ namespace ClassGame {
                     Chess* chess = dynamic_cast<Chess*>(game);
                     if (chess && ImGui::Button("Test Moves")) {
                         chess->testMoveGeneration();
+                    }
+
+                    if (chess && ImGui::CollapsingHeader("Chess Test Panel")) {
+                        if (ImGui::Button("Reset")) {
+                            chess->loadPositionFromFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+                        }
+                        if (ImGui::Button("Castling Test")) {
+                            chess->loadPositionFromFEN("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+                        }
+                        if (ImGui::Button("Enpassant Test")) {
+                            chess->loadPositionFromFEN("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+                        }
+                        if (ImGui::Button("Promotion Test")) {
+                            chess->loadPositionFromFEN("4k3/P7/8/8/8/8/7p/4K3 w - - 0 1");
+                        }
+                        if (ImGui::Button("King Capture Test")) {
+                            chess->loadPositionFromFEN("4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1");
+                        }
                     }
                 }                ImGui::End();
 
